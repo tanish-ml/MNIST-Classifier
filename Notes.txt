@@ -1,0 +1,109 @@
+Project: MNIST Classifier (PyTorch)
+
+Summary of what I learned and key takeaways
+------------------------------------------
+
+1) Project overview
+   - Built a small convolutional neural network (SimpleCNN) to classify MNIST digits.
+   - Completed a full training loop in a Jupyter notebook: data loading, model, loss, optimizer,
+     training loop, evaluation, checkpointing (save state_dict), and early stopping.
+
+2) Data handling and transforms
+   - Used torchvision.datasets.MNIST with a local `./MNIST-Data` folder. torchvision handles
+     the raw IDX format and will download files if needed.
+   - Applied transforms.ToTensor() and transforms.Normalize((0.1307,), (0.3081,)) for standard
+     MNIST normalization.
+   - Learned that DataLoader `num_workers` can cause issues on Windows in notebooks — default to
+     `num_workers=0` for notebooks and small experiments.
+
+3) Model architecture and design choices
+   - The SimpleCNN contains two conv layers (1→16→32) with ReLU and MaxPool, then two linear
+     layers. The original notebook used Linear(32*7*7, 10) -> ReLU -> Linear(10, 10).
+   - Realized the final fully-connected layers are unusually small (10→10). A more standard
+     approach uses a larger hidden layer (e.g., 128 or 256) before the final 10-class linear
+     output. This improves capacity.
+   - For production or better performance consider adding BatchNorm, Dropout, and deeper conv
+     stacks or residual connections for more complex problems.
+
+4) Training loop and metrics
+   - Implemented manual training: zero_grad, forward, compute loss (CrossEntropyLoss), backward,
+     optimizer.step(), and per-epoch average train loss.
+   - Recorded train_losses, test_losses, and test_accuracies lists for plotting and monitoring.
+   - Learned to compute epoch-average train loss by summing per-batch loss * batch_size and
+     dividing by full dataset size (prevents weighting errors when batch sizes vary).
+
+5) Bug found: evaluation loss averaging
+   - The evaluation function added batch mean losses and then divided by `len(test_loader.dataset) / BATCH_SIZE`.
+     This is fragile if dataset % batch_size != 0 because the last batch is smaller. The robust
+     approach is either:
+       a) Accumulate per-batch loss * batch_size and divide by total number of samples; or
+       b) Accumulate batch means and divide by `len(test_loader)` (the number of batches).
+   - Fix: use test_loss += criterion(output, target).item() * data.size(0) and after the loop do
+     test_loss /= len(test_loader.dataset).
+
+6) Checkpointing and early stopping
+   - Implemented checkpointing that saves model.state_dict() when validation accuracy improves.
+   - Early stopping logic tracks epochs without accuracy improvement and stops after PATIENCE epochs.
+   - Important: When loading saved state_dict, use `torch.load(path, map_location=Config.DEVICE)`
+     to ensure CPU/GPU compatibility.
+
+7) Device handling and save/load portability
+   - Use `torch.device('cuda' if available else 'cpu')` consistently.
+   - Always use `map_location` when loading a checkpoint if the saving device may differ from the load device.
+
+8) Reproducibility
+   - Learned to set deterministic seeds for repeatability: `torch.manual_seed(seed)`,
+     `numpy.random.seed(seed)`, `random.seed(seed)`.
+   - For deterministic GPU behavior: `torch.backends.cudnn.deterministic = True` and
+     `torch.backends.cudnn.benchmark = False`. Note: determinism may hurt performance.
+
+9) Visualization & interpretability
+   - Built `conv_visualization.ipynb` to inspect convolution kernels and intermediate feature maps.
+   - Visualized conv1 filters easily (single-channel greyscale). For deeper conv layers with
+     multiple input channels we averaged across input channels for a compact visualization.
+   - Learned to use forward hooks to capture activations for a single input image (register_forward_hook).
+   - Consider using TensorBoard for richer, interactive visualizations and logging during training.
+
+10) Practical tips & windows-specific notes
+    - On Windows, DataLoader with `num_workers>0` requires careful use when running from scripts
+      (use `if __name__ == '__main__':`) or run with `num_workers=0` inside notebooks.
+    - If you see CUDA OOM errors, reduce `BATCH_SIZE` or move to CPU.
+    - Logging frequency: printing every N batches is helpful; a more scalable approach uses
+      a logger or TensorBoard.
+
+11) Hyperparameters & experiments
+    - Default LR and optimizer choices matter: the notebook used SGD with momentum; consider
+      trying Adam / learning-rate schedules for faster convergence.
+    - PATIENCE=2 is aggressive; increase if your validation metric is noisy.
+
+12) Next improvements I tried / recommend
+    - Change FC layers to `fc1 = Linear(32*7*7, 128); fc2 = Linear(128, 10)` with ReLU between.
+    - Fix evaluation loss averaging as described above.
+    - Add a reproducible `requirements.txt` or `environment.yml` to record exact package versions.
+    - Use a separate validation set (split training data) instead of using test for checkpointing.
+    - Add unit tests: forward-shape check for the model and a small smoke test for one training step.
+    - Optionally convert the notebook training loop to a script with CLI flags (argparse) for
+      reproducible runs and easier CI testing.
+
+13) What this taught me about ML engineering
+    - Small implementation details (loss averaging, device mapping, data loader setup) can silently
+      affect results and reproducibility.
+    - Visualizing filters and activations gives intuition about what a network learns and helps
+      debug training issues (dead filters, trivial outputs).
+    - Checkpointing and safe load/save practices are essential for experiments that move between
+      machines or between CPU/GPU environments.
+
+If you'd like, I can:
+ - Apply the recommended fixes directly to the notebook (loss averaging, FC layer change, safe load),
+ - Add a `requirements.txt` with pinned versions,
+ - Add a small unit test or a standalone training script,
+ - Add PNG export of visualization outputs or TensorBoard logging in the training notebook.
+| File                                               | Needed?              | Why                                    |
+| -------------------------------------------------- | -------------------- | -------------------------------------- |
+| `.pth` weights                                     | ✔                    | Stores learned parameters              |
+| Model architecture code (`model.py`)               | ✔                    | Tells PyTorch how to build the network |
+| Preprocessing pipeline (`transform.py` or similar) | ✔                    | Ensures correct inputs                 |
+| Label mapping (`labels.json` or `.txt`)            | optional / usually ✔ | Needed for classification output       |
+| Training config (hyperparams)                      | optional             | Not required for inference, but useful |
+
+
